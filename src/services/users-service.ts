@@ -54,3 +54,37 @@ export async function loginUser(payload: any) {
 
   return { data: token };
 }
+
+export async function getCurrentUser(authHeader: string | undefined) {
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    throw new Error("Unauthorized");
+  }
+
+  const token = authHeader.substring(7).trim();
+  if (!token) {
+    throw new Error("Unauthorized");
+  }
+
+  // Cari session berdasarkan token
+  const sessionList = await db.select().from(sessions).where(eq(sessions.token, token));
+  const session = sessionList[0];
+  if (!session) {
+    throw new Error("Unauthorized");
+  }
+
+  // Cari data user berdasarkan user_id dari session
+  const userList = await db.select().from(users).where(eq(users.id, session.userId));
+  const user = userList[0];
+  if (!user) {
+    throw new Error("Unauthorized");
+  }
+
+  return {
+    data: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      created_at: user.createdAt,
+    },
+  };
+}
