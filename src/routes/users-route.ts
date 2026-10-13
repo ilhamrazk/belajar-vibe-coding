@@ -1,35 +1,104 @@
-import { Elysia } from "elysia";
-import { getCurrentUser, loginUser, registerUser } from "../services/users-service";
+import { Elysia, t } from "elysia";
+import {
+  BadRequestError,
+  getCurrentUser,
+  loginUser,
+  logoutUser,
+  registerUser,
+  UnauthorizedError,
+} from "../services/users-service";
 
 export const usersRoute = new Elysia({ prefix: "/api/users" })
-  .post("/", async ({ body, set }: any) => {
-    try {
-      const result = await registerUser(body);
-      set.status = 200; // or 201
-      return result;
-    } catch (error: any) {
-      set.status = 400;
-      return { error: error.message || "Bad Request" };
+  .post(
+    "/",
+    async ({ body, set }) => {
+      try {
+        const result = await registerUser(body);
+        set.status = 200;
+        return result;
+      } catch (error: any) {
+        if (error instanceof BadRequestError) {
+          set.status = 400;
+          return { error: error.message };
+        }
+        set.status = 500;
+        return { error: "Internal Server Error" };
+      }
+    },
+    {
+      body: t.Object({
+        name: t.String(),
+        email: t.String(),
+        password: t.String(),
+      }),
     }
-  })
-  .post("/login", async ({ body, set }: any) => {
-    try {
-      const result = await loginUser(body);
-      set.status = 200;
-      return result;
-    } catch (error: any) {
-      set.status = 400;
-      return { error: error.message || "Bad Request" };
+  )
+  .post(
+    "/login",
+    async ({ body, set }) => {
+      try {
+        const result = await loginUser(body);
+        set.status = 200;
+        return result;
+      } catch (error: any) {
+        if (error instanceof BadRequestError) {
+          set.status = 400;
+          return { error: error.message };
+        }
+        set.status = 500;
+        return { error: "Internal Server Error" };
+      }
+    },
+    {
+      body: t.Object({
+        email: t.String(),
+        password: t.String(),
+      }),
     }
-  })
-  .get("/current", async ({ headers, set }: any) => {
-    try {
-      const authHeader = headers["authorization"] || headers["Authorization"];
-      const result = await getCurrentUser(authHeader);
-      set.status = 200;
-      return result;
-    } catch (error: any) {
-      set.status = 401;
-      return { error: error.message || "Unauthorized" };
+  )
+  .get(
+    "/current",
+    async ({ headers, set }) => {
+      try {
+        const authHeader = headers["authorization"];
+        const result = await getCurrentUser(authHeader);
+        set.status = 200;
+        return result;
+      } catch (error: any) {
+        if (error instanceof UnauthorizedError) {
+          set.status = 401;
+          return { error: error.message };
+        }
+        set.status = 500;
+        return { error: "Internal Server Error" };
+      }
+    },
+    {
+      headers: t.Object({
+        authorization: t.Optional(t.String()),
+      }),
     }
-  });
+  )
+  .delete(
+    "/logout",
+    async ({ headers, set }) => {
+      try {
+        const authHeader = headers["authorization"];
+        const result = await logoutUser(authHeader);
+        set.status = 200;
+        return result;
+      } catch (error: any) {
+        if (error instanceof UnauthorizedError) {
+          set.status = 401;
+          return { error: error.message };
+        }
+        set.status = 500;
+        return { error: "Internal Server Error" };
+      }
+    },
+    {
+      headers: t.Object({
+        authorization: t.Optional(t.String()),
+      }),
+    }
+  );
