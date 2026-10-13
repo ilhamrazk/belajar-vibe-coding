@@ -45,6 +45,25 @@ describe("Auth Endpoints", () => {
     expect(body.error).toBe("Email sudah terdaftar");
   });
 
+  it("POST /api/users - should fail registering with name longer than 255 characters", async () => {
+    const longName = "A".repeat(300);
+    const res = await app.handle(
+      new Request("http://localhost/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: longName,
+          email: `longname_${Date.now()}@example.com`,
+          password: "password123",
+        }),
+      })
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as any;
+    expect(body.error).toBe("Nama maksimal 255 karakter");
+  });
+
   it("POST /api/users/login - should fail login with wrong password", async () => {
     const res = await app.handle(
       new Request("http://localhost/api/users/login", {

@@ -32,6 +32,19 @@ export function extractBearerToken(authHeader: string | undefined): string {
 export async function registerUser(payload: any) {
   const { name, email, password } = payload;
 
+  // Validasi panjang karakter name
+  if (!name || typeof name !== "string" || name.trim().length === 0) {
+    throw new BadRequestError("Nama wajib diisi");
+  }
+
+  if (name.length > 255) {
+    throw new BadRequestError("Nama maksimal 255 karakter");
+  }
+
+  if (email && email.length > 255) {
+    throw new BadRequestError("Email maksimal 255 karakter");
+  }
+
   // Cek apakah email sudah terdaftar
   const existingUser = await db.select().from(users).where(eq(users.email, email)).limit(1);
   if (existingUser.length > 0) {

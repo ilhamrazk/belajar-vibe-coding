@@ -9,6 +9,12 @@ import {
 } from "../services/users-service";
 
 export const usersRoute = new Elysia({ prefix: "/api/users" })
+  .onError(({ code, error, set }) => {
+    if (code === "VALIDATION") {
+      set.status = 400;
+      return { error: error.message };
+    }
+  })
   .post(
     "/",
     async ({ body, set }) => {
@@ -27,8 +33,8 @@ export const usersRoute = new Elysia({ prefix: "/api/users" })
     },
     {
       body: t.Object({
-        name: t.String(),
-        email: t.String(),
+        name: t.String({ maxLength: 255, error: "Nama maksimal 255 karakter" }),
+        email: t.String({ maxLength: 255, error: "Email maksimal 255 karakter" }),
         password: t.String(),
       }),
     }
