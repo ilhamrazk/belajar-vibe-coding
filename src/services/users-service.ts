@@ -88,3 +88,26 @@ export async function getCurrentUser(authHeader: string | undefined) {
     },
   };
 }
+
+export async function logoutUser(authHeader: string | undefined) {
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    throw new Error("Unauthorized");
+  }
+
+  const token = authHeader.substring(7).trim();
+  if (!token) {
+    throw new Error("Unauthorized");
+  }
+
+  // Validasi keberadaan session di database
+  const sessionList = await db.select().from(sessions).where(eq(sessions.token, token));
+  const session = sessionList[0];
+  if (!session) {
+    throw new Error("Unauthorized");
+  }
+
+  // Hapus session dari database
+  await db.delete(sessions).where(eq(sessions.token, token));
+
+  return { data: "OK" };
+}

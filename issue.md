@@ -1,9 +1,9 @@
-# Issue: Implementasi API Get Current User (GET /api/users/current)
+# Issue: Implementasi API Logout User (DELETE /api/users/logout)
 
 ## 📋 Deskripsi Fitur
-Membuat endpoint REST API `GET /api/users/current` untuk mengambil informasi profil pengguna yang saat ini sedang login berdasarkan token autentikasi sesi.
+Membuat endpoint REST API `DELETE /api/users/logout` untuk menghapus sesi login pengguna yang sedang aktif dari database.
 
-Client akan mengirimkan token pada header `Authorization: Bearer <token>`. Server akan memvalidasi token tersebut ke tabel `sessions` di database MySQL. Jika token valid, server akan mengambil data user terkait dari tabel `users` (tanpa menyertakan field `password`) dan mengembalikannya kepada client. Jika token tidak ada, tidak valid, atau user tidak ditemukan, server mengembalikan respon error `Unauthorized` (HTTP 401).
+Client akan mengirimkan token sesi pada request header `Authorization: Bearer <token>`. Server akan memvalidasi apakah token tersebut ada di tabel `sessions`. Jika token valid dan ditemukan, server akan menghapus baris session tersebut dari tabel `sessions` di database MySQL sehingga token tidak dapat digunakan lagi, kemudian mengembalikan respon `{ "data": "OK" }` (HTTP 200). Jika header tidak ada, format salah, atau token tidak ditemukan di database, server mengembalikan respon error `{"error": "Unauthorized"}` (HTTP 401).
 
 Dokumen perencanaan ini dirancang sangat terstruktur dan detail agar dapat diimplementasikan dengan mudah oleh **junior programmer** maupun **AI model**.
 
@@ -18,26 +18,26 @@ src/
 │   ├── index.ts           # Koneksi Drizzle MySQL (sudah ada)
 │   └── schema.ts          # Schema tabel users dan sessions (sudah ada)
 ├── routes/
-│   └── users-route.ts     # Route ElysiaJS (tambahkan endpoint GET /current di sini)
+│   └── users-route.ts     # Route ElysiaJS (tambahkan endpoint DELETE /logout di sini)
 ├── services/
-│   └── users-service.ts   # Business logic (tambahkan fungsi getCurrentUser di sini)
+│   └── users-service.ts   # Business logic (tambahkan fungsi logoutUser di sini)
 └── index.ts               # Entry point server ElysiaJS
 ```
 
 ---
 
-## 🔌 Spesifikasi API: Get Current User
+## 🔌 Spesifikasi API: Logout User
 
 ### Endpoint
-- **Method**: `GET`
-- **Path**: `/api/users/current` (karena `usersRoute` memiliki prefix `/api/users`, di handler route cukup didefinisikan sebagai `.get("/current", ...)`)
+- **Method**: `DELETE`
+- **Path**: `/api/users/logout` (karena `usersRoute` memiliki prefix `/api/users`, di handler route cukup didefinisikan sebagai `.delete("/logout", ...)`)
 
 ### Request Header
 | Header Name     | Format / Nilai                   | Wajib |
 | --------------- | -------------------------------- | ----- |
 | `Authorization` | `Bearer <token>`                | Ya    |
 
-*Keterangan: `<token>` adalah string UUID yang diperoleh client saat berhasil melakukan login pada endpoint `POST /api/users/login`.*
+*Keterangan: `<token>` adalah string UUID yang diperoleh client saat login (`POST /api/users/login`) dan tersimpan di tabel `sessions`.*
 
 ### Request Body
 *Tidak ada (kosong).*
@@ -47,23 +47,18 @@ src/
 ### Response Body
 
 #### 1. Response Sukses (`200 OK`)
-Dikembalikan jika header Authorization valid dan token terdaftar di tabel `sessions`:
+Dikembalikan jika header `Authorization` valid, token ditemukan di database `sessions`, dan data session berhasil dihapus:
 
 ```json
 {
-  "data": {
-    "id": 1,
-    "name": "ilham",
-    "email": "ilham@gmail.com",
-    "created_at": "2026-10-12T21:59:04.000Z"
-  }
+  "data": "OK"
 }
 ```
 
-> ⚠️ **Penting untuk Keamanan**: Kolom `password` **TIDAK BOLEH** disertakan dalam response JSON!
+> ⚠️ **Efek Samping di Database**: Record session dengan token tersebut pada tabel `sessions` **harus terhapus** sehingga panggilan berikutnya ke `GET /api/users/current` menggunakan token tersebut akan menghasilkan `401 Unauthorized`.
 
 #### 2. Response Gagal (`401 Unauthorized`)
-Dikembalikan jika header `Authorization` tidak dikirim, format tidak diawali `Bearer `, token tidak ditemukan di database `sessions`, atau user tidak ditemukan:
+Dikembalikan jika header `Authorization` tidak dikirim, format tidak diawali `Bearer `, atau token tidak ditemukan di tabel `sessions`:
 
 ```json
 {
@@ -78,7 +73,7 @@ Dikembalikan jika header `Authorization` tidak dikirim, format tidak diawali `Be
 Berikut adalah urutan tahapan yang wajib dijalankan secara berurutan:
 
 ### Langkah 1: Implementasi Logic di Service Layer (`src/services/users-service.ts`)
-Tambahkan fungsi `getCurrentUser(authHeader: string | undefined)` di file `src/services/users-service.ts`.
+Tambahkan fungsi `logoutUser(authHeader: string | undefined)` di file `src/services/users-service.ts`.
 
 #### Alur Logika:
 1. **Validasi Header Authorization**:
@@ -95,8 +90,8 @@ Tambahkan fungsi `getCurrentUser(authHeader: string | undefined)` di file `src/s
        throw new Error("Unauthorized");
      }
      ```
-3. **Cari Session di Database**:
-   - Query tabel `sessions` menggunakan token yang diekstrak:
+3. **Validasi Keberadaan Session di Database**:
+   - Query tabel `sessions` berdasarkan token:
      ```typescript
      const sessionList = await db.select().from(sessions).where(eq(sessions.token, token));
      const session = sessionList[0];
@@ -104,38 +99,27 @@ Tambahkan fungsi `getCurrentUser(authHeader: string | undefined)` di file `src/s
        throw new Error("Unauthorized");
      }
      ```
-4. **Cari User Terkait di Database**:
-   - Ambil data user dari tabel `users` berdasarkan `session.userId`:
+4. **Hapus Session dari Database**:
+   - Hapus record session tersebut dari tabel `sessions`:
      ```typescript
-     const userList = await db.select().from(users).where(eq(users.id, session.userId));
-     const user = userList[0];
-     if (!user) {
-       throw new Error("Unauthorized");
-     }
+     await db.delete(sessions).where(eq(sessions.token, token));
      ```
-5. **Kembalikan Data Profil User**:
-   - Bentuk object respon tanpa menyertakan `password`:
+5. **Kembalikan Respon Sukses**:
+   - Return respon:
      ```typescript
-     return {
-       data: {
-         id: user.id,
-         name: user.name,
-         email: user.email,
-         created_at: user.createdAt,
-       },
-     };
+     return { data: "OK" };
      ```
 
 ---
 
 ### Langkah 2: Tambahkan Route Handler di Route Layer (`src/routes/users-route.ts`)
-1. Import fungsi `getCurrentUser` dari `../services/users-service`.
-2. Daftarkan method `.get("/current", ...)` pada instance `usersRoute`:
+1. Import fungsi `logoutUser` dari `../services/users-service`.
+2. Daftarkan method `.delete("/logout", ...)` pada instance `usersRoute`:
    ```typescript
-   .get("/current", async ({ headers, set }: any) => {
+   .delete("/logout", async ({ headers, set }: any) => {
      try {
        const authHeader = headers["authorization"] || headers["Authorization"];
-       const result = await getCurrentUser(authHeader);
+       const result = await logoutUser(authHeader);
        set.status = 200;
        return result;
      } catch (error: any) {
@@ -160,30 +144,44 @@ Tambahkan fungsi `getCurrentUser(authHeader: string | undefined)` di file `src/s
    bun run dev
    ```
 
-3. **Uji Skenario Berhasil (Token Valid)**:
-   Gunakan token UUID yang aktif di database:
-   ```bash
-   curl -X GET http://localhost:3000/api/users/current \
-     -H "Authorization: Bearer <MASUKKAN_TOKEN_VALID_DI_SINI>"
-   ```
-   *Expected Response:* Status `200`, body berisi data user dengan kolom `id`, `name`, `email`, dan `created_at` (tanpa password).
+3. **Uji Skenario Berhasil (Logout dengan Token Valid)**:
+   - Langkah A: Lakukan login terlebih dahulu untuk mendapatkan token baru:
+     ```bash
+     curl -X POST http://localhost:3000/api/users/login \
+       -H "Content-Type: application/json" \
+       -d '{"email":"ilham@gmail.com","password":"password"}'
+     ```
+     *(Salin string token dari response `{ "data": "<TOKEN>" }`)*
+   - Langkah B: Kirim request logout dengan token tersebut:
+     ```bash
+     curl -X DELETE http://localhost:3000/api/users/logout \
+       -H "Authorization: Bearer <TOKEN>"
+     ```
+     *Expected Response:* Status `200`, body: `{"data": "OK"}`.
+   - Langkah C: Verifikasi bahwa token sudah tidak bisa digunakan lagi:
+     ```bash
+     curl -X GET http://localhost:3000/api/users/current \
+       -H "Authorization: Bearer <TOKEN>"
+     ```
+     *Expected Response:* Status `401`, body: `{"error": "Unauthorized"}`.
 
 4. **Uji Skenario Gagal (Tanpa Header Authorization)**:
    ```bash
-   curl -X GET http://localhost:3000/api/users/current
+   curl -X DELETE http://localhost:3000/api/users/logout
    ```
    *Expected Response:* Status `401`, body: `{"error": "Unauthorized"}`.
 
-5. **Uji Skenario Gagal (Token Salah / Acak)**:
+5. **Uji Skenario Gagal (Token Sudah Terhapus / Token Palsu)**:
+   Kirim request logout ulang menggunakan token yang sama (sudah dihapus) atau token acak:
    ```bash
-   curl -X GET http://localhost:3000/api/users/current \
-     -H "Authorization: Bearer token-ngawur-12345"
+   curl -X DELETE http://localhost:3000/api/users/logout \
+     -H "Authorization: Bearer <TOKEN_SUDAH_LOGOUT>"
    ```
    *Expected Response:* Status `401`, body: `{"error": "Unauthorized"}`.
 
 6. **Uji Skenario Gagal (Format Header Bukan Bearer)**:
    ```bash
-   curl -X GET http://localhost:3000/api/users/current \
+   curl -X DELETE http://localhost:3000/api/users/logout \
      -H "Authorization: Basic dXNlcjpwYXNz"
    ```
    *Expected Response:* Status `401`, body: `{"error": "Unauthorized"}`.
@@ -191,10 +189,11 @@ Tambahkan fungsi `getCurrentUser(authHeader: string | undefined)` di file `src/s
 ---
 
 ## ✅ Kriteria Penerimaan (Acceptance Criteria)
-- [ ] Endpoint `GET /api/users/current` berhasil didaftarkan dan dapat diakses.
-- [ ] Header `Authorization` dengan prefix `Bearer ` divalidasi dengan benar.
-- [ ] Token diverifikasi ke tabel `sessions` untuk memperoleh user yang sesuai.
-- [ ] Respon sukses mengembalikan data profil pengguna (HTTP 200) dan **tidak mengekspos hash password**.
-- [ ] Request tanpa token / token tidak valid mengembalikan error `{"error": "Unauthorized"}` (HTTP 401).
+- [ ] Endpoint `DELETE /api/users/logout` berhasil didaftarkan dan dapat diakses.
+- [ ] Header `Authorization` dengan format `Bearer <token>` divalidasi dengan benar.
+- [ ] Record session yang sesuai dengan token dihapus dari tabel `sessions` saat logout berhasil.
+- [ ] Respon sukses mengembalikan `{ "data": "OK" }` (HTTP 200).
+- [ ] Setelah logout berhasil, token yang sama tidak dapat lagi digunakan untuk mengakses endpoint `GET /api/users/current` (menghasilkan HTTP 401).
+- [ ] Request tanpa token / token tidak valid / token yang sudah dihapus menghasilkan error `{"error": "Unauthorized"}` (HTTP 401).
 - [ ] Mengikuti pemisahan struktur folder `src/routes` dan `src/services`.
 - [ ] Kode lulus pengecekan type TypeScript (`bun run typecheck`).
